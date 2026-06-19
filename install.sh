@@ -96,6 +96,51 @@ fi
 info "Polling every ${INTERVAL}s ($(awk -v s="$INTERVAL" 'BEGIN { printf "%g", s / 60 }') min)."
 
 # ---------------------------------------------------------------------------
+# Review scope: notify on direct requests only, or also team requests?
+# GitHub's `review-requested:@me` matches BOTH PRs requested from you directly
+# and from teams you belong to; `user-review-requested:@me` is direct-only.
+# Precedence: GH_PR_NOTIFY_QUERY env > interactive prompt > current/default.
+# ---------------------------------------------------------------------------
+DIRECT_QUERY="user-review-requested:@me --state=open"
+TEAM_QUERY="--review-requested=@me --state=open"
+
+# Default the prompt to the scope already installed, else direct-only.
+default_scope=1
+if [[ -f "$PLIST" ]]; then
+  existing_q="$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:GH_PR_NOTIFY_QUERY' "$PLIST" 2>/dev/null || true)"
+  [[ "$existing_q" == "$TEAM_QUERY" ]] && default_scope=2
+fi
+
+if [[ -n "${GH_PR_NOTIFY_QUERY:-}" ]]; then
+  REVIEW_QUERY="$GH_PR_NOTIFY_QUERY"
+  info "Using review scope from GH_PR_NOTIFY_QUERY: $REVIEW_QUERY"
+elif [[ -t 0 ]]; then
+  info "Which review requests should notify you?"
+  printf '      1) Only when you are requested directly (default)\n'
+  printf "      2) Also when a team you're on is requested\n"
+  REVIEW_QUERY=""
+  while :; do
+    printf '\033[1;34m==>\033[0m Choose [1/2] (%s): ' "$default_scope"
+    read -r ans || ans=""
+    ans="${ans:-$default_scope}"
+    case "$ans" in
+      1) REVIEW_QUERY="$DIRECT_QUERY"; break ;;
+      2) REVIEW_QUERY="$TEAM_QUERY";   break ;;
+      *) warn "Enter 1 or 2." ;;
+    esac
+  done
+else
+  REVIEW_QUERY="$DIRECT_QUERY"
+  [[ "$default_scope" == 2 ]] && REVIEW_QUERY="$TEAM_QUERY"
+  info "Non-interactive shell; review scope defaulted. Set GH_PR_NOTIFY_QUERY to override."
+fi
+if [[ "$REVIEW_QUERY" == "$TEAM_QUERY" ]]; then
+  info "Review scope: direct + team requests."
+else
+  info "Review scope: direct requests only."
+fi
+
+# ---------------------------------------------------------------------------
 # Build a PATH for the agent that includes wherever gh and terminal-notifier
 # actually live (asdf shim, Homebrew, or system) — no hardcoded paths.
 # ---------------------------------------------------------------------------
@@ -151,6 +196,8 @@ cat > "$PLIST" <<PLIST_EOF
         <string>${agent_path}</string>
         <key>HOME</key>
         <string>${HOME}</string>
+        <key>GH_PR_NOTIFY_QUERY</key>
+        <string>${REVIEW_QUERY}</string>
     </dict>
     <key>StartInterval</key>
     <integer>${INTERVAL}</integer>

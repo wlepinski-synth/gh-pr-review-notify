@@ -12,7 +12,9 @@
 #
 # Configuration (all optional, via environment variables):
 #   GH_PR_NOTIFY_QUERY       Search args passed to `gh search prs`.
-#                            Default: "--review-requested=@me --state=open"
+#                            Default: "user-review-requested:@me --state=open"
+#                            (direct requests only). For team requests too, use
+#                            "--review-requested=@me --state=open".
 #   GH_PR_NOTIFY_LIMIT       Max PRs to fetch per run. Default: 50
 #   GH_PR_NOTIFY_STATE_DIR   Where dedup state is kept.
 #                            Default: ${XDG_STATE_HOME:-$HOME/.local/state}/gh-pr-review-notify
@@ -34,7 +36,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-QUERY="${GH_PR_NOTIFY_QUERY:---review-requested=@me --state=open}"
+QUERY="${GH_PR_NOTIFY_QUERY:-user-review-requested:@me --state=open}"
 LIMIT="${GH_PR_NOTIFY_LIMIT:-50}"
 STATE_DIR="${GH_PR_NOTIFY_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/gh-pr-review-notify}"
 STATE_FILE="$STATE_DIR/notified.tsv"
