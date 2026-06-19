@@ -50,10 +50,17 @@ cd gh-pr-review-notify
 `install.sh` will:
 1. Verify `gh` is installed and authenticated.
 2. Install `terminal-notifier` via Homebrew (if available).
-3. Generate a per-user launchd plist (`com.<you>.pr-review-notify`) with a
+3. **Ask how often to check GitHub, in minutes** (e.g. `1`, `5`, `15`, or
+   `0.5`). The prompt defaults to the interval you're already running, or 15
+   minutes on a first install. Press Enter to accept the default. Re-run
+   anytime to change it.
+4. Generate a per-user launchd plist (`com.<you>.pr-review-notify`) with a
    `PATH` pointing at wherever your `gh` actually lives (asdf / Homebrew /
    system — auto-detected).
-4. Load the agent. It then runs immediately and every minute.
+5. Load the agent. It then runs immediately and on your chosen interval.
+
+> For unattended installs (no terminal/CI), skip the prompt by setting
+> `GH_PR_NOTIFY_INTERVAL` (in **seconds**) before running — see below.
 
 ## Configuration
 
@@ -69,7 +76,7 @@ For the **installer**:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `GH_PR_NOTIFY_INTERVAL` | `900` | Poll interval in seconds. (This install uses `60`.) |
+| `GH_PR_NOTIFY_INTERVAL` | _(prompted)_ | Poll interval in **seconds**. When set, the installer skips the interactive minutes prompt and uses this value — handy for unattended installs. |
 
 To change runtime config permanently, set the variable in the plist's
 `EnvironmentVariables` dict (or edit the script defaults) and re-run

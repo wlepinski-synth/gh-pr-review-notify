@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
-# install.sh — set up the GitHub PR-review desktop notifier as a launchd agent
-# that runs every 15 minutes (and at login).
+# install.sh — set up the GitHub PR-review desktop notifier as a launchd agent.
+# Prompts for how often to check (in minutes); runs that often and at login.
 #
-# Safe to re-run: it boots out any existing agent before reloading.
+# Safe to re-run: it boots out any existing agent before reloading, and
+# defaults the prompt to the interval you're already using.
 
 set -euo pipefail
 
@@ -16,7 +17,6 @@ UID_NUM="$(id -u)"
 LABEL="com.${USER_NAME}.pr-review-notify"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 LOG_FILE="$HOME/Library/Logs/gh-pr-review-notify.log"
-INTERVAL="${GH_PR_NOTIFY_INTERVAL:-900}"   # seconds; 900 = 15 min
 
 info()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33mWARN:\033[0m %s\n' "$*"; }
@@ -47,6 +47,53 @@ elif command -v brew >/dev/null 2>&1; then
 else
   warn "Homebrew not found. Notifications will use the osascript fallback (non-clickable)."
 fi
+
+# ---------------------------------------------------------------------------
+# Poll interval (seconds). Precedence:
+#   1) GH_PR_NOTIFY_INTERVAL env var (in seconds — for non-interactive runs)
+#   2) interactive prompt, asked in minutes
+#   3) the interval this machine is already using, else 15 minutes
+# ---------------------------------------------------------------------------
+
+# Minutes -> whole seconds (accepts decimals like 0.5). Prints 0 if invalid/<=0.
+mins_to_secs() {
+  awk -v m="$1" 'BEGIN {
+    if (m ~ /^[0-9]+([.][0-9]+)?$/ && m + 0 > 0) printf "%d", (m * 60) + 0.5
+    else print 0
+  }'
+}
+
+# Default offered at the prompt: the current install's interval, else 15 min.
+default_min=15
+if [[ -f "$PLIST" ]]; then
+  existing="$(/usr/libexec/PlistBuddy -c 'Print :StartInterval' "$PLIST" 2>/dev/null || true)"
+  if [[ "$existing" =~ ^[0-9]+$ && "$existing" -ge 1 ]]; then
+    default_min="$(awk -v s="$existing" 'BEGIN { m = s / 60; printf (m == int(m) ? "%d" : "%g"), m }')"
+  fi
+fi
+
+if [[ -n "${GH_PR_NOTIFY_INTERVAL:-}" ]]; then
+  INTERVAL="$GH_PR_NOTIFY_INTERVAL"
+  info "Using interval from GH_PR_NOTIFY_INTERVAL: ${INTERVAL}s"
+elif [[ -t 0 ]]; then
+  INTERVAL=""
+  while :; do
+    printf '\033[1;34m==>\033[0m How often should it check GitHub? Interval in minutes [%s]: ' "$default_min"
+    read -r reply || reply=""
+    reply="${reply:-$default_min}"
+    secs="$(mins_to_secs "$reply")"
+    if [[ "$secs" -ge 1 ]]; then
+      INTERVAL="$secs"
+      [[ "$secs" -lt 60 ]] && warn "Under a minute (${secs}s) — that's frequent, but allowed."
+      break
+    fi
+    warn "Enter a positive number of minutes (e.g. 1, 5, 15, or 0.5)."
+  done
+else
+  INTERVAL="$(mins_to_secs "$default_min")"
+  info "Non-interactive shell; defaulting to ${default_min} min. Set GH_PR_NOTIFY_INTERVAL (seconds) to override."
+fi
+info "Polling every ${INTERVAL}s ($(awk -v s="$INTERVAL" 'BEGIN { printf "%g", s / 60 }') min)."
 
 # ---------------------------------------------------------------------------
 # Build a PATH for the agent that includes wherever gh and terminal-notifier
