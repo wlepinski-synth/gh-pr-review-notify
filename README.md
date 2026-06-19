@@ -85,7 +85,7 @@ All optional, via environment variables. For the **script** at runtime:
 | `GH_PR_NOTIFY_STATE_DIR` | `$XDG_STATE_HOME/gh-pr-review-notify` (or `~/.local/state/...`) | Where dedup state lives. |
 | `GH_PR_NOTIFY_EXCLUDE_TITLE` | `DO NOT REVIEW\|WIP` | Case-insensitive regex of PR titles to skip. Set empty to disable. |
 | `GH_PR_NOTIFY_INCLUDE_DRAFTS` | `0` | Set `1` to notify about draft PRs too. |
-| `GH_PR_NOTIFY_SUMMARY_THRESHOLD` | `5` | If more than this many PRs are newly pending in one run, send a single summary banner instead of one per PR. `0` = always per-PR. |
+| `GH_PR_NOTIFY_SUMMARY_THRESHOLD` | `5` | If more than this many PRs are newly pending in one run, send a single summary banner instead of one per PR. `0` = always per-PR. Clicking the summary opens your GitHub review queue, filtered to match your configured scope. |
 | `GH_PR_NOTIFY_ICON` | bundled `gh-mark.png` | Image shown on the banner (path or URL). Empty for none. |
 
 For the **installer**:

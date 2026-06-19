@@ -43,8 +43,6 @@ STATE_FILE="$STATE_DIR/notified.tsv"
 EXCLUDE_TITLE="${GH_PR_NOTIFY_EXCLUDE_TITLE-DO NOT REVIEW|WIP}"
 INCLUDE_DRAFTS="${GH_PR_NOTIFY_INCLUDE_DRAFTS:-0}"
 SUMMARY_THRESHOLD="${GH_PR_NOTIFY_SUMMARY_THRESHOLD:-5}"
-# GitHub's "review requested" queue, opened when the summary banner is clicked.
-REVIEW_QUEUE_URL="https://github.com/pulls?q=is%3Aopen+is%3Apr+review-requested%3A%40me"
 
 # Banner image, shown on the right of the notification via terminal-notifier's
 # -contentImage. (The left app icon can't be changed by a flag on modern macOS,
@@ -107,6 +105,29 @@ human_age() {
   elif (( diff < 86400 )); then printf '%dh' $(( diff / 3600 ))
   else                          printf '%dd' $(( diff / 86400 ))
   fi
+}
+
+# ---------------------------------------------------------------------------
+# Build the github.com/pulls URL that mirrors $QUERY, so the summary banner
+# lands on the same set of PRs it counted (direct-only vs direct+team, etc.).
+# Translates the gh search args we know about; falls back to direct requests.
+# ---------------------------------------------------------------------------
+review_queue_url() {
+  local q="$1" parts="is:pr is:open" tok enc
+  for tok in $q; do
+    case "$tok" in
+      --state=open)            ;;                                       # already is:open
+      --state=closed)          parts="is:pr is:closed" ;;
+      --review-requested=*)    parts="$parts review-requested:${tok#*=}" ;;
+      user-review-requested:*) parts="$parts $tok" ;;
+      review-requested:*)      parts="$parts $tok" ;;
+      *)                       ;;                                       # ignore unmapped flags/terms
+    esac
+  done
+  # Ensure there's a review qualifier; default to direct if the query was custom.
+  case "$parts" in *review-requested:*) ;; *) parts="$parts user-review-requested:@me" ;; esac
+  enc=$(printf '%s' "$parts" | sed -e 's#/#%2F#g' -e 's/ /+/g' -e 's/:/%3A/g' -e 's/@/%40/g')
+  printf 'https://github.com/pulls?q=%s' "$enc"
 }
 
 # ---------------------------------------------------------------------------
@@ -208,7 +229,7 @@ if (( n == 0 )); then
   :
 elif (( SUMMARY_THRESHOLD > 0 && n > SUMMARY_THRESHOLD )); then
   # Too many at once — one summary banner that opens your review queue.
-  notify "PR reviews requested" "" "${n} PRs awaiting your review" "$REVIEW_QUEUE_URL"
+  notify "PR reviews requested" "" "${n} PRs awaiting your review" "$(review_queue_url "$QUERY")"
 else
   for entry in "${to_notify[@]}"; do
     IFS=$'\t' read -r repo author age title url <<< "$entry"
