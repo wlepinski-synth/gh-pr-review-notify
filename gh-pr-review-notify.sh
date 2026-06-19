@@ -11,12 +11,19 @@
 # specific to a single user or machine, so it can be shared as-is.
 #
 # Configuration (all optional, via environment variables):
-#   GH_PR_NOTIFY_QUERY      Search args passed to `gh search prs`.
-#                           Default: "--review-requested=@me --state=open"
-#                           Example to skip drafts: add " --draft=false"
-#   GH_PR_NOTIFY_LIMIT      Max PRs to fetch per run. Default: 50
-#   GH_PR_NOTIFY_STATE_DIR  Where dedup state is kept.
-#                           Default: ${XDG_STATE_HOME:-$HOME/.local/state}/gh-pr-review-notify
+#   GH_PR_NOTIFY_QUERY       Search args passed to `gh search prs`.
+#                            Default: "--review-requested=@me --state=open"
+#   GH_PR_NOTIFY_LIMIT       Max PRs to fetch per run. Default: 50
+#   GH_PR_NOTIFY_STATE_DIR   Where dedup state is kept.
+#                            Default: ${XDG_STATE_HOME:-$HOME/.local/state}/gh-pr-review-notify
+#   GH_PR_NOTIFY_EXCLUDE_TITLE  Case-insensitive regex of PR titles to skip.
+#                            Default: "DO NOT REVIEW|WIP". Set empty to disable.
+#   GH_PR_NOTIFY_INCLUDE_DRAFTS  Set to 1 to notify about draft PRs too.
+#                            Default: drafts are skipped.
+#   GH_PR_NOTIFY_SUMMARY_THRESHOLD  When more than this many PRs are newly
+#                            pending in one run, send a single summary banner
+#                            instead of one per PR. Default: 5. Set 0 to always
+#                            send per-PR banners.
 #
 # Exit codes: 0 = ran fine; 1 = a precondition/transient failure (logged, and
 # in the failure case the dedup state is left untouched so recovery doesn't
@@ -31,6 +38,11 @@ QUERY="${GH_PR_NOTIFY_QUERY:---review-requested=@me --state=open}"
 LIMIT="${GH_PR_NOTIFY_LIMIT:-50}"
 STATE_DIR="${GH_PR_NOTIFY_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/gh-pr-review-notify}"
 STATE_FILE="$STATE_DIR/notified.tsv"
+EXCLUDE_TITLE="${GH_PR_NOTIFY_EXCLUDE_TITLE-DO NOT REVIEW|WIP}"
+INCLUDE_DRAFTS="${GH_PR_NOTIFY_INCLUDE_DRAFTS:-0}"
+SUMMARY_THRESHOLD="${GH_PR_NOTIFY_SUMMARY_THRESHOLD:-5}"
+# GitHub's "review requested" queue, opened when the summary banner is clicked.
+REVIEW_QUEUE_URL="https://github.com/pulls?q=is%3Aopen+is%3Apr+review-requested%3A%40me"
 
 # Banner image, shown on the right of the notification via terminal-notifier's
 # -contentImage. (The left app icon can't be changed by a flag on modern macOS,
@@ -80,6 +92,22 @@ notify() {
 }
 
 # ---------------------------------------------------------------------------
+# Human-friendly age from an ISO-8601 UTC timestamp ("2026-06-05T14:57:42Z").
+# Uses BSD `date` (macOS). Prints "" if the timestamp can't be parsed.
+# ---------------------------------------------------------------------------
+human_age() {
+  local created="$1" created_s now diff
+  created_s=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$created" +%s 2>/dev/null) || { printf ''; return; }
+  now=$(date +%s)
+  diff=$(( now - created_s ))
+  (( diff < 0 )) && diff=0
+  if   (( diff < 3600 ));  then printf '%dm' $(( diff / 60 ))
+  elif (( diff < 86400 )); then printf '%dh' $(( diff / 3600 ))
+  else                          printf '%dd' $(( diff / 86400 ))
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Preconditions
 # ---------------------------------------------------------------------------
 
@@ -113,8 +141,8 @@ gh_stderr=$(mktemp)
 # shellcheck disable=SC2086  # QUERY intentionally expands to multiple args
 if ! current=$(gh search prs $QUERY \
       --limit "$LIMIT" \
-      --json url,title,repository,updatedAt \
-      --jq '.[] | [.url, .updatedAt, .repository.nameWithOwner, .title] | @tsv' \
+      --json url,title,repository,updatedAt,author,createdAt,isDraft \
+      --jq '.[] | [.url, .updatedAt, .repository.nameWithOwner, (.author.login // ""), .createdAt, (.isDraft|tostring), .title] | @tsv' \
       2>"$gh_stderr"); then
   err=$(cat "$gh_stderr"); rm -f "$gh_stderr"
   if printf '%s' "$err" | grep -qi 'rate limit'; then
@@ -139,24 +167,55 @@ already_notified() {
 }
 
 new_state=$(mktemp)
-notified=0
 total=0
+skipped=0
+to_notify=()   # TSV-encoded entries (repo, author, age, title, url) to notify
 
 if [[ -n "$current" ]]; then
-  while IFS=$'\t' read -r url updated repo title; do
+  while IFS=$'\t' read -r url updated repo author created isdraft title; do
     [[ -z "$url" ]] && continue
+
+    # Skip drafts unless explicitly included.
+    if [[ "$isdraft" == "true" && "$INCLUDE_DRAFTS" != "1" ]]; then
+      skipped=$((skipped + 1)); continue
+    fi
+    # Skip titles matching the exclude pattern (case-insensitive).
+    if [[ -n "$EXCLUDE_TITLE" ]]; then
+      shopt -s nocasematch
+      if [[ "$title" =~ $EXCLUDE_TITLE ]]; then
+        shopt -u nocasematch; skipped=$((skipped + 1)); continue
+      fi
+      shopt -u nocasematch
+    fi
+
     total=$((total + 1))
     printf '%s\t%s\n' "$url" "$updated" >> "$new_state"
     if ! already_notified "$url" "$updated"; then
-      notify "PR review requested" "$repo" "$title" "$url"
-      notified=$((notified + 1))
+      to_notify+=("$repo"$'\t'"$author"$'\t'"$(human_age "$created")"$'\t'"$title"$'\t'"$url")
     fi
   done <<< "$current"
 fi
 
-# Atomically replace state with only the currently-open PRs (closed/merged drop
-# out so they re-notify if reopened; file stays bounded).
+# Atomically replace state with only the currently-open (non-skipped) PRs, so
+# closed/merged drop out (and re-notify if reopened) and the file stays bounded.
+# A draft that later becomes review-ready is absent here, so it surfaces as new.
 mv "$new_state" "$STATE_FILE"
 
-log "OK: ${total} PR(s) awaiting review, ${notified} new notification(s)."
+n=${#to_notify[@]}
+if (( n == 0 )); then
+  :
+elif (( SUMMARY_THRESHOLD > 0 && n > SUMMARY_THRESHOLD )); then
+  # Too many at once — one summary banner that opens your review queue.
+  notify "PR reviews requested" "" "${n} PRs awaiting your review" "$REVIEW_QUEUE_URL"
+else
+  for entry in "${to_notify[@]}"; do
+    IFS=$'\t' read -r repo author age title url <<< "$entry"
+    subtitle="$repo"
+    [[ -n "$author" ]] && subtitle="$subtitle — @$author"
+    [[ -n "$age" ]]    && subtitle="$subtitle · $age"
+    notify "PR review requested" "$subtitle" "$title" "$url"
+  done
+fi
+
+log "OK: ${total} PR(s) awaiting review, ${n} new notification(s), ${skipped} skipped (draft/excluded)."
 exit 0

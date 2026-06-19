@@ -15,8 +15,9 @@ terminal (or Claude Code) isn't open, and starts automatically at login.
 launchd (every 60s) ──▶ gh-pr-review-notify.sh
                               │
                               ├─ gh search prs --review-requested=@me --state=open
+                              ├─ skip drafts + excluded titles (DO NOT REVIEW / WIP)
                               ├─ dedup against a small state file
-                              └─ notify (terminal-notifier → clickable, else osascript)
+                              └─ notify (per-PR, or one summary banner when many)
 ```
 
 - **No credentials are stored.** The script uses the GitHub CLI's own auth
@@ -26,6 +27,12 @@ launchd (every 60s) ──▶ gh-pr-review-notify.sh
   `updatedAt`. You're notified when a PR is newly requested, or when it gets a
   new update — never repeatedly for the same unchanged PR. Closed/merged PRs
   drop out automatically.
+- **Noise control:** draft PRs and titles matching `DO NOT REVIEW`/`WIP` are
+  skipped by default. A draft that later becomes review-ready then shows up as
+  new. (A draft turning ready re-notifies once it's no longer a draft.)
+- **Calm banners:** each PR's banner shows the repo, author, and age
+  (e.g. `repo — @alice · 2d`). When more than a threshold of PRs are newly
+  pending at once, you get a single summary banner instead of a flood.
 
 ## Prerequisites
 
@@ -68,9 +75,13 @@ All optional, via environment variables. For the **script** at runtime:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `GH_PR_NOTIFY_QUERY` | `--review-requested=@me --state=open` | Search args for `gh search prs`. e.g. append ` --draft=false` to skip drafts. |
+| `GH_PR_NOTIFY_QUERY` | `--review-requested=@me --state=open` | Search args for `gh search prs`. |
 | `GH_PR_NOTIFY_LIMIT` | `50` | Max PRs fetched per run. |
 | `GH_PR_NOTIFY_STATE_DIR` | `$XDG_STATE_HOME/gh-pr-review-notify` (or `~/.local/state/...`) | Where dedup state lives. |
+| `GH_PR_NOTIFY_EXCLUDE_TITLE` | `DO NOT REVIEW\|WIP` | Case-insensitive regex of PR titles to skip. Set empty to disable. |
+| `GH_PR_NOTIFY_INCLUDE_DRAFTS` | `0` | Set `1` to notify about draft PRs too. |
+| `GH_PR_NOTIFY_SUMMARY_THRESHOLD` | `5` | If more than this many PRs are newly pending in one run, send a single summary banner instead of one per PR. `0` = always per-PR. |
+| `GH_PR_NOTIFY_ICON` | bundled `gh-mark.png` | Image shown on the banner (path or URL). Empty for none. |
 
 For the **installer**:
 
@@ -127,3 +138,7 @@ launchctl bootout gui/$(id -u)/com.$(id -un).pr-review-notify
 rm ~/Library/LaunchAgents/com.$(id -un).pr-review-notify.plist
 rm -rf ~/.local/state/gh-pr-review-notify
 ```
+
+## License
+
+[MIT](LICENSE) © William Lepinski
