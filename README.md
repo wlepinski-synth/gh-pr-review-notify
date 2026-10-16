@@ -28,6 +28,30 @@ open the list.
   warning triangle, the popover shows the reason, and the last good list stays
   visible. Polling backs off while errors continue.
 
+## How it works
+
+```mermaid
+flowchart TD
+    timer["Poll timer<br/>(every N min, backs off on errors)"] --> refresh["ReviewStore.refresh()"]
+    refresh --> gh["GitHubClient runs gh"]
+    gh -->|"gh api graphql<br/>two searches in one query"| api[("GitHub API")]
+    gh -->|"gh api user/teams<br/>(once per launch)"| api
+    api --> filter["Drop drafts and<br/>DO NOT REVIEW / WIP titles"]
+    filter --> split{"Requested by name?"}
+    split -->|"yes: user-review-requested:@me"| direct["Direct list"]
+    split -->|"no: review-requested:@me"| team["Team list<br/>+ your team badges"]
+    direct --> ui["Menu bar counters<br/>+ popover tabs"]
+    team --> ui
+    direct --> notifier["Notifier"]
+    notifier --> state[("notified.json<br/>url + updatedAt")]
+    notifier -->|"new or updated PRs"| banner["macOS banner<br/>(summary if more than 5)"]
+    banner -->|click| browser["PR opens in browser"]
+    ui -->|click row| browser
+```
+
+The app never talks to GitHub itself. Every request goes through the `gh` CLI,
+so it reuses your existing login and no token is stored.
+
 ## Prerequisites
 
 - macOS 14 or later
