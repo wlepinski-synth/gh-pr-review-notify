@@ -8,12 +8,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private static let summaryThreshold = 5
     private let center = UNUserNotificationCenter.current()
     private let stateURL: URL
+    private let myPRsStateURL: URL
 
     override init() {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("PRReviews", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         stateURL = dir.appendingPathComponent("notified.json")
+        myPRsStateURL = dir.appendingPathComponent("myprs.json")
         super.init()
     }
 
@@ -52,6 +54,33 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// Banners when one of your PRs changes status since the last run.
+    func processMyPRs(_ prs: [MyPullRequest], notify: Bool) {
+        let current = Dictionary(
+            prs.map { ($0.url.absoluteString, $0.snapshot) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        defer { save(current, to: myPRsStateURL) }
+
+        guard notify, let previous: [String: PRSnapshot] = load(from: myPRsStateURL) else { return }
+
+        for pr in prs {
+            guard let old = previous[pr.url.absoluteString],
+                  let transition = PRStatus.transition(old: old, new: pr.snapshot) else { continue }
+            post(
+                id: "\(pr.url.absoluteString)#\(transition.rawValue)",
+                title: transition.title,
+                subtitle: "\(pr.shortRepo)#\(pr.number)",
+                body: pr.title,
+                url: pr.url
+            )
+        }
+    }
+
+    func storedMyPRSnapshots() -> [String: PRSnapshot] {
+        load(from: myPRsStateURL) ?? [:]
+    }
+
     private func post(id: String, title: String, subtitle: String, body: String, url: URL) {
         let content = UNMutableNotificationContent()
         content.title = title
@@ -63,13 +92,21 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func load() -> [String: String]? {
-        guard let data = try? Data(contentsOf: stateURL) else { return nil }
-        return try? JSONDecoder().decode([String: String].self, from: data)
+        load(from: stateURL)
     }
 
     private func save(_ state: [String: String]) {
+        save(state, to: stateURL)
+    }
+
+    private func load<T: Decodable>(from url: URL) -> T? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(T.self, from: data)
+    }
+
+    private func save<T: Encodable>(_ state: T, to url: URL) {
         guard let data = try? JSONEncoder().encode(state) else { return }
-        try? data.write(to: stateURL, options: .atomic)
+        try? data.write(to: url, options: .atomic)
     }
 
     private static func stamp(_ date: Date) -> String {

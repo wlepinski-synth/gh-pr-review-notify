@@ -5,6 +5,8 @@ enum Prefs {
     static let includeDraftsKey = "includeDrafts"
     static let excludeTitleKey = "excludeTitleRegex"
     static let ghPathKey = "ghPath"
+    static let myPRsPollMinutesKey = "myPRsPollMinutes"
+    static let myPRsBannersKey = "myPRsBanners"
 
     static let defaultExcludeTitle = "DO NOT REVIEW|WIP"
 
@@ -18,4 +20,11 @@ enum Prefs {
     static var includeDrafts: Bool { defaults.bool(forKey: includeDraftsKey) }
     static var excludeTitleRegex: String { defaults.string(forKey: excludeTitleKey) ?? defaultExcludeTitle }
     static var ghPath: String { defaults.string(forKey: ghPathKey) ?? "" }
+
+    static var myPRsPollMinutes: Int {
+        let value = defaults.integer(forKey: myPRsPollMinutesKey)
+        return value > 0 ? value : 2
+    }
+
+    static var myPRsBanners: Bool { defaults.object(forKey: myPRsBannersKey) as? Bool ?? true }
 }

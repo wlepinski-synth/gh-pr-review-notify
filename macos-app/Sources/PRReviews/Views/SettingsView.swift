@@ -3,28 +3,42 @@ import SwiftUI
 
 struct SettingsView: View {
     let store: ReviewStore
+    let myStore: MyPRsStore
 
     @AppStorage(Prefs.pollMinutesKey) private var pollMinutes = 1
     @AppStorage(Prefs.includeDraftsKey) private var includeDrafts = false
     @AppStorage(Prefs.excludeTitleKey) private var excludeTitle = Prefs.defaultExcludeTitle
+    @AppStorage(Prefs.myPRsPollMinutesKey) private var myPRsPollMinutes = 2
+    @AppStorage(Prefs.myPRsBannersKey) private var myPRsBanners = true
     @AppStorage(Prefs.ghPathKey) private var ghPath = ""
     @StateObject private var loginItem = LoginItem()
 
     var body: some View {
         Form {
-            Stepper("Check every \(pollMinutes) min", value: $pollMinutes, in: 1...60)
-            Toggle("Include draft PRs", isOn: $includeDrafts)
-            TextField("Skip titles matching (regex)", text: $excludeTitle)
-            TextField("gh path", text: $ghPath, prompt: Text(GitHubClient.resolvedGHPath ?? "not found"))
-            Toggle("Open at login", isOn: Binding(get: { loginItem.isEnabled }, set: { loginItem.set($0) }))
-            if let error = loginItem.error {
-                Text(error).font(.caption).foregroundStyle(.red)
+            Section("Review requests") {
+                Stepper("Check every \(pollMinutes) min", value: $pollMinutes, in: 1...60)
+                Toggle("Include draft PRs", isOn: $includeDrafts)
+                TextField("Skip titles matching (regex)", text: $excludeTitle)
+            }
+            Section("My PRs") {
+                Stepper("Check every \(myPRsPollMinutes) min", value: $myPRsPollMinutes, in: 1...60)
+                Toggle("Banners when status changes", isOn: $myPRsBanners)
+            }
+            Section("General") {
+                TextField("gh path", text: $ghPath, prompt: Text(GitHubClient.resolvedGHPath ?? "not found"))
+                Toggle("Open at login", isOn: Binding(get: { loginItem.isEnabled }, set: { loginItem.set($0) }))
+                if let error = loginItem.error {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
             }
         }
         .formStyle(.grouped)
         .frame(width: 440)
         .onDisappear {
-            Task { await store.refresh() }
+            Task {
+                await store.refresh()
+                await myStore.refresh()
+            }
         }
     }
 }

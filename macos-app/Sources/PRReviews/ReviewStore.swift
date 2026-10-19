@@ -4,11 +4,17 @@ import Observation
 enum ReviewTab: String, CaseIterable, Identifiable {
     case direct = "Direct"
     case team = "Team"
+    case mine = "My PRs"
 
     var id: String { rawValue }
 
     var queueURL: URL {
-        let query = self == .direct ? GitHubClient.directQuery : GitHubClient.allQuery
+        let query: String
+        switch self {
+        case .direct: query = GitHubClient.directQuery
+        case .team: query = GitHubClient.allQuery
+        case .mine: query = GitHubClient.myOpenQuery
+        }
         var components = URLComponents(string: "https://github.com/pulls")!
         components.queryItems = [URLQueryItem(name: "q", value: query)]
         return components.url!
@@ -27,25 +33,21 @@ final class ReviewStore {
     private(set) var isRefreshing = false
 
     private let client = GitHubClient()
+    private let poller = Poller()
     private var myTeams: Set<String>?
-    private var failures = 0
-    private var loop: Task<Void, Never>?
 
     func start() {
-        guard loop == nil else { return }
-        loop = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                await self.refresh()
-                let base = Double(Prefs.pollMinutes) * 60
-                let backoff = Double(min(1 << self.failures, 8))
-                try? await Task.sleep(for: .seconds(base * backoff))
-            }
+        poller.start(interval: { Prefs.pollMinutes }) { [weak self] in
+            await self?.refresh() ?? false
         }
     }
 
-    func refresh() async {
-        guard !isRefreshing else { return }
+    func pause() { poller.pause() }
+    func resume() { poller.resume() }
+
+    @discardableResult
+    func refresh() async -> Bool {
+        guard !isRefreshing else { return true }
         isRefreshing = true
         defer { isRefreshing = false }
 
@@ -64,12 +66,12 @@ final class ReviewStore {
             team = teamPRs.sorted { $0.createdAt > $1.createdAt }
             lastRefreshed = Date()
             errorMessage = nil
-            failures = 0
 
             Notifier.shared.process(direct)
+            return true
         } catch {
-            failures += 1
             errorMessage = (error as? GHError)?.userMessage ?? error.localizedDescription
+            return false
         }
     }
 

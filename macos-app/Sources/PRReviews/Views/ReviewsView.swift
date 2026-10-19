@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MenuBarLabel: View {
     let store: ReviewStore
+    let myStore: MyPRsStore
 
     // The menu bar drops images inside Text and ignores spacing,
     // so the whole label is drawn into a single image.
@@ -20,6 +21,9 @@ struct MenuBarLabel: View {
                 .padding(.trailing, 6)
             Image(systemName: "person.2.fill")
             Text("\(store.team.count)")
+                .padding(.trailing, 6)
+            Image(systemName: "exclamationmark.circle")
+            Text("\(myStore.needsActionCount)")
         }
         .font(.system(size: 13, weight: .medium).monospacedDigit())
         .foregroundStyle(.black)
@@ -34,7 +38,7 @@ struct MenuBarLabel: View {
 
     @ViewBuilder
     private var icon: some View {
-        if store.errorMessage != nil {
+        if store.errorMessage != nil || myStore.errorMessage != nil {
             Image(systemName: "exclamationmark.triangle")
         } else if let mark = Self.githubMark {
             Image(nsImage: mark).resizable().scaledToFit()
@@ -53,66 +57,104 @@ struct MenuBarLabel: View {
 
 struct ReviewsView: View {
     let store: ReviewStore
+    let myStore: MyPRsStore
     @AppStorage("selectedTab") private var tab: ReviewTab = .direct
     @Environment(\.openSettings) private var openSettings
 
-    private var prs: [PullRequest] { tab == .direct ? store.direct : store.team }
+    private var errorMessage: String? { tab == .mine ? myStore.errorMessage : store.errorMessage }
+    private var lastRefreshed: Date? { tab == .mine ? myStore.lastRefreshed : store.lastRefreshed }
+    private var isRefreshing: Bool { tab == .mine ? myStore.isRefreshing : store.isRefreshing }
 
     var body: some View {
         VStack(spacing: 0) {
-            TabBar(selection: $tab, counts: [.direct: store.direct.count, .team: store.team.count])
+            PillTabBar(selection: $tab, counts: [
+                .direct: store.direct.count,
+                .team: store.team.count,
+                .mine: myStore.openCount,
+            ])
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 4)
 
-            Divider()
-
-            if let error = store.errorMessage {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                Divider()
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
             }
 
-            Group {
-                if prs.isEmpty {
-                    Text(tab == .direct ? "No PRs request you directly." : "No team review requests.")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(prs) { pr in
-                                PRRow(pr: pr, teams: tab == .team ? store.teamBadges(for: pr) : [])
-                                Divider()
-                            }
-                        }
-                    }
-                }
-            }
-            // A fixed height keeps the popover from resizing (or staying tiny) when tabs switch.
-            .frame(height: 380)
+            list
+                // A fixed height keeps the popover from resizing (or staying tiny) when tabs switch.
+                .frame(height: 480)
 
             Divider()
             footer
         }
-        .frame(width: 420)
+        .frame(width: 460)
+    }
+
+    @ViewBuilder
+    private var list: some View {
+        switch tab {
+        case .direct, .team:
+            let prs = tab == .direct ? store.direct : store.team
+            if prs.isEmpty {
+                EmptyMessage(text: tab == .direct ? "No PRs request you directly." : "No team review requests.")
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(prs) { pr in
+                            ReviewCard(pr: pr, teams: tab == .team ? store.teamBadges(for: pr) : [])
+                        }
+                    }
+                    .padding(14)
+                }
+            }
+        case .mine:
+            if myStore.prs.isEmpty {
+                EmptyMessage(text: "You have no open PRs.")
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(PRGroup.allCases) { group in
+                            let prs = myStore.prs.filter { PRStatus.group($0.snapshot) == group }
+                            if !prs.isEmpty {
+                                SectionHeader(title: group.title, count: prs.count, tone: group.tone)
+                                    .padding(.top, group == firstGroup ? 0 : 10)
+                                ForEach(prs) { pr in
+                                    MyPRCard(pr: pr, store: myStore)
+                                }
+                            }
+                        }
+                    }
+                    .padding(14)
+                }
+            }
+        }
+    }
+
+    private var firstGroup: PRGroup? {
+        PRGroup.allCases.first { group in myStore.prs.contains { PRStatus.group($0.snapshot) == group } }
     }
 
     private var footer: some View {
-        HStack(spacing: 12) {
-            if let date = store.lastRefreshed {
-                Text("Updated \(Text(date, style: .relative)) ago")
-                    .font(.caption)
+        HStack(spacing: 16) {
+            if let lastRefreshed {
+                Text("Updated \(Text(lastRefreshed, style: .relative)) ago")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
             Spacer()
             Button {
-                Task { await store.refresh() }
+                Task {
+                    if tab == .mine { await myStore.refresh() } else { await store.refresh() }
+                }
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .disabled(store.isRefreshing)
+            .disabled(isRefreshing)
             .help("Refresh")
 
             Button {
@@ -138,117 +180,51 @@ struct ReviewsView: View {
             .help("Quit")
         }
         .buttonStyle(.borderless)
-        .padding(10)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 }
 
-private struct TabBar: View {
-    @Binding var selection: ReviewTab
-    let counts: [ReviewTab: Int]
-    @Namespace private var underline
-
-    var body: some View {
-        HStack(spacing: 20) {
-            ForEach(ReviewTab.allCases) { tab in
-                let isSelected = tab == selection
-                Button {
-                    withAnimation(.snappy(duration: 0.2)) { selection = tab }
-                } label: {
-                    VStack(spacing: 6) {
-                        HStack(spacing: 6) {
-                            Text(tab.rawValue)
-                                .fontWeight(isSelected ? .semibold : .regular)
-                            CountPill(count: counts[tab] ?? 0, highlighted: isSelected)
-                        }
-                        .foregroundStyle(isSelected ? .primary : .secondary)
-
-                        ZStack {
-                            Color.clear.frame(height: 2)
-                            if isSelected {
-                                Capsule()
-                                    .fill(Color.accentColor)
-                                    .frame(height: 2)
-                                    .matchedGeometryEffect(id: "underline", in: underline)
-                            }
-                        }
-                    }
-                    .fixedSize()
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 12)
-    }
-}
-
-private struct CountPill: View {
-    let count: Int
-    let highlighted: Bool
-
-    var body: some View {
-        Text("\(count)")
-            .font(.caption.monospacedDigit())
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .background(Capsule().fill(highlighted ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.08)))
-    }
-}
-
-private struct PRRow: View {
-    let pr: PullRequest
-    let teams: [String]
-    @StateObject private var hover = HoverState()
-
-    var body: some View {
-        Button {
-            NSWorkspace.shared.open(pr.url)
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(pr.title)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                HStack(spacing: 6) {
-                    Text(meta)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if pr.isDraft { Badge(text: "draft") }
-                    ForEach(teams, id: \.self) { Badge(text: $0) }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-            .background(hover.isHovering ? Color.primary.opacity(0.08) : .clear)
-        }
-        .buttonStyle(.plain)
-        .onHover { hover.isHovering = $0 }
-    }
-
-    private var meta: String {
-        var parts = [pr.shortRepo]
-        if !pr.author.isEmpty { parts.append("@\(pr.author)") }
-        parts.append(Age.short(since: pr.createdAt))
-        return parts.joined(separator: " · ")
-    }
-}
-
-// SwiftUI's @State is a macro, and Command Line Tools ship without its plugin.
-private final class HoverState: ObservableObject {
-    @Published var isHovering = false
-}
-
-private struct Badge: View {
+private struct EmptyMessage: View {
     let text: String
 
     var body: some View {
         Text(text)
-            .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .background(Capsule().fill(Color.accentColor.opacity(0.18)))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ReviewCard: View {
+    let pr: PullRequest
+    let teams: [String]
+
+    var body: some View {
+        Card(url: pr.url) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(pr.title)
+                    .font(.body.weight(.semibold))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Text(verbatim: meta)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            if pr.isDraft || !teams.isEmpty {
+                HStack(spacing: 6) {
+                    if pr.isDraft { Badge(text: "draft") }
+                    ForEach(teams, id: \.self) { Badge(text: $0) }
+                }
+            }
+        }
+    }
+
+    private var meta: String {
+        var parts = ["\(pr.shortRepo) #\(pr.url.lastPathComponent)"]
+        if !pr.author.isEmpty { parts.append("@\(pr.author)") }
+        parts.append(Age.short(since: pr.createdAt))
+        return parts.joined(separator: " · ")
     }
 }
