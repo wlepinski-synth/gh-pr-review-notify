@@ -12,9 +12,9 @@ anywhere.
 ## What it does
 
 The menu bar shows the GitHub mark followed by three counters: a person icon
-with your direct requests, a two-person icon with your team requests, and an
-exclamation mark with how many of your own PRs need you. Click it to open the
-list.
+with your direct requests, a two-person icon with your team requests, and a
+branch icon with your open PRs. Each counter matches its tab. Click it to open
+the list.
 
 - **Direct tab**: PRs matching `user-review-requested:@me`.
 - **Team tab**: PRs matching `review-requested:@me` that aren't direct. Each row
@@ -30,11 +30,10 @@ list.
 - **Merge queue**: in repos with a merge queue, cards get an **Add to queue**
   button once GitHub says the PR can merge, and **Remove from queue** while it's
   queued. The first click asks to confirm, the second one does it.
-- **Needs action** (the third counter) counts PRs with conflicts, failing
-  checks, changes requested, a branch behind base, or ready to merge without
-  auto-merge on.
-- Click a row to open the PR. The footer has refresh, open-on-GitHub, settings
-  and quit buttons.
+- **Needs your attention** groups PRs with conflicts, failing checks, changes
+  requested, a branch behind base, or ready to merge without auto-merge on.
+- Click a row to open the PR. The footer has refresh (spins while loading),
+  open-on-GitHub, settings and quit buttons.
 - Drafts and titles matching `DO NOT REVIEW|WIP` are hidden by default in the
   review tabs. My PRs always shows drafts, labelled Draft.
 - **Review banners** fire for direct requests only. You get one when a PR is

@@ -112,6 +112,44 @@ struct SecondaryButtonStyle: ButtonStyle {
     }
 }
 
+/// Icon-only button with a soft rounded highlight on hover.
+struct IconButton<Label: View>: View {
+    let help: String
+    let action: () -> Void
+    @ViewBuilder let label: () -> Label
+    @StateObject private var hover = HoverState()
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
+        Button(action: action) {
+            label()
+                .frame(width: 28, height: 28)
+                .foregroundStyle(hover.isHovering && isEnabled ? Color.primary : Color.secondary)
+                .background(shape.fill(Color.primary.opacity(hover.isHovering && isEnabled ? 0.08 : 0)))
+                .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover.isHovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hover.isHovering)
+        .help(help)
+    }
+}
+
+/// SF Symbol that spins continuously while `isSpinning` is true.
+struct SpinningIcon: View {
+    let systemName: String
+    let isSpinning: Bool
+
+    var body: some View {
+        TimelineView(.animation(paused: !isSpinning)) { context in
+            let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1)
+            Image(systemName: systemName)
+                .rotationEffect(.degrees(isSpinning ? turn * 360 : 0))
+        }
+    }
+}
+
 struct Badge: View {
     let text: String
 

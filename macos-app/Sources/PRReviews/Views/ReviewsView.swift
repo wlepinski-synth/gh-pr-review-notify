@@ -2,8 +2,10 @@ import AppKit
 import SwiftUI
 
 struct MenuBarLabel: View {
-    let store: ReviewStore
-    let myStore: MyPRsStore
+    let direct: Int
+    let team: Int
+    let mine: Int
+    let hasError: Bool
 
     // The menu bar drops images inside Text and ignores spacing,
     // so the whole label is drawn into a single image.
@@ -17,13 +19,13 @@ struct MenuBarLabel: View {
                 .frame(width: 16, height: 16)
                 .padding(.trailing, 4)
             Image(systemName: "person.fill")
-            Text("\(store.direct.count)")
+            Text("\(direct)")
                 .padding(.trailing, 6)
             Image(systemName: "person.2.fill")
-            Text("\(store.team.count)")
+            Text("\(team)")
                 .padding(.trailing, 6)
-            Image(systemName: "exclamationmark.circle")
-            Text("\(myStore.needsActionCount)")
+            Image(systemName: "arrow.triangle.branch")
+            Text("\(mine)")
         }
         .font(.system(size: 13, weight: .medium).monospacedDigit())
         .foregroundStyle(.black)
@@ -38,7 +40,7 @@ struct MenuBarLabel: View {
 
     @ViewBuilder
     private var icon: some View {
-        if store.errorMessage != nil || myStore.errorMessage != nil {
+        if hasError {
             Image(systemName: "exclamationmark.triangle")
         } else if let mark = Self.githubMark {
             Image(nsImage: mark).resizable().scaledToFit()
@@ -140,49 +142,44 @@ struct ReviewsView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 4) {
             if let lastRefreshed {
                 Text("Updated \(Text(lastRefreshed, style: .relative)) ago")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button {
+            IconButton(help: "Refresh") {
                 Task {
                     if tab == .mine { await myStore.refresh() } else { await store.refresh() }
                 }
             } label: {
-                Image(systemName: "arrow.clockwise")
+                SpinningIcon(systemName: "arrow.clockwise", isSpinning: isRefreshing)
             }
             .disabled(isRefreshing)
-            .help("Refresh")
 
-            Button {
+            IconButton(help: "Open on GitHub") {
                 NSWorkspace.shared.open(tab.queueURL)
             } label: {
                 Image(systemName: "safari")
             }
-            .help("Open on GitHub")
 
-            Button {
+            IconButton(help: "Settings") {
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
             } label: {
                 Image(systemName: "gearshape")
             }
-            .help("Settings")
 
-            Button {
+            IconButton(help: "Quit") {
                 NSApp.terminate(nil)
             } label: {
                 Image(systemName: "power")
             }
-            .help("Quit")
         }
-        .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.leading, 16)
+        .padding(.trailing, 10)
+        .padding(.vertical, 8)
     }
 }
 

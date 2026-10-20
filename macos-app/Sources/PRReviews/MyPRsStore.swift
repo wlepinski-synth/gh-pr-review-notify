@@ -18,7 +18,6 @@ final class MyPRsStore {
     private let poller = Poller()
 
     var openCount: Int { prs.filter(\.snapshot.isOpen).count }
-    var needsActionCount: Int { prs.filter { PRStatus.needsAction($0.snapshot) }.count }
 
     func start() {
         poller.start(interval: { Prefs.myPRsPollMinutes }) { [weak self] in

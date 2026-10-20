@@ -11,7 +11,14 @@ struct PRReviewsApp: App {
         MenuBarExtra {
             ReviewsView(store: store, myStore: myStore)
         } label: {
-            MenuBarLabel(store: store, myStore: myStore)
+            // Values are read here so the scene body observes them; the
+            // menu bar label view doesn't reliably re-render on its own.
+            MenuBarLabel(
+                direct: store.direct.count,
+                team: store.team.count,
+                mine: myStore.openCount,
+                hasError: store.errorMessage != nil || myStore.errorMessage != nil
+            )
         }
         .menuBarExtraStyle(.window)
 
